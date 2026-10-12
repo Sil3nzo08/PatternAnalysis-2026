@@ -54,7 +54,7 @@ def build_img_seg_pairs(img_dir, seg_dir):
 
         # There was this like couple of datafiles that had a different shape, (256, 144), so decided to remove them from training set (didn't appear in validation nor test sets so we chill)
         if (nib.load(full_img_path).shape != IMAGE_SHAPE):
-            print(f"Removed: {extract_key(img_files[i])}")
+            #print(f"Removed: {extract_key(img_files[i])}")
             continue
 
         img_seg_pairs[extract_key(img_files[i])] =  (full_img_path, full_seg_path)
@@ -149,8 +149,5 @@ def get_dataloaders(root, batch_size, num_workers=0):
 
 
 if __name__ == "__main__":
-    train, validate, test, num_classes = get_dataloaders(ROOT, 8)
-    print(len(train.dataset), len(validate.dataset), len(test.dataset))   # expect 11400 660 540
-    img, mask, key = next(iter(train))
-    print(img.shape, mask.shape, key.shape)   # [8,1,256,128] [8,6,256,128] [8,3]
-    print(mask.sum(dim=1).unique())           # tensor([1.])
+    train, val, test, num_classes = get_dataloaders(ROOT, 8)
+    ds = train.dataset
