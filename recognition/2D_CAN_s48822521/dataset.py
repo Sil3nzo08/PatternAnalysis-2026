@@ -4,6 +4,11 @@ PURPOSE: Containing the data loader for loading and preprocessing your data, inc
 Data Pipeline & Alignment: Enforce strict patient-level splitting. Standardize intensity normalization and one-hot multi-channel mask encoding. Preserve exact spatial alignment between images and ground truth masks (see Appendix B for Nifti loading).
 
 The classes for the mask are: [0, 1, 2, 3, 4, 5]
+
+TODO:
+- Need to augment data to generate some more 
+- Probably should have an actual rigorous and thorough tester to ensure there's no data leakage between train-validate-test sets
+
 """
 
 from torch.utils.data import Dataset, DataLoader
@@ -14,6 +19,10 @@ import os
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+
+ROOT = r"Dataset\keras_slices_data"
+IMAGE_SHAPE = (256, 128) # Got it from looking inside the data
+
 
 def extract_key(name: str):
     """
@@ -39,6 +48,14 @@ def build_img_seg_pairs(img_dir, seg_dir):
     for i in range(len(img_files)):
         full_img_path = os.path.join(img_dir, img_files[i])
         full_seg_path = os.path.join(seg_dir, seg_files[i])
+
+        # Should match based off of file names
+        assert extract_key(img_files[i]) == extract_key(seg_files[i]), "Mismatched key between images and masks" 
+
+        # There was this like couple of datafiles that had a different shape, (256, 144), so decided to remove them from training set (didn't appear in validation nor test sets so we chill)
+        if (nib.load(full_img_path).shape != IMAGE_SHAPE):
+            print(f"Removed: {extract_key(img_files[i])}")
+            continue
 
         img_seg_pairs[extract_key(img_files[i])] =  (full_img_path, full_seg_path)
 
@@ -85,7 +102,7 @@ class HipMRIDataset2D(Dataset):
 
         # Load segmentation label
         seg = nib.load(seg_path).get_fdata(caching='unchanged') # (256, 128)
-        seg = seg.astype(int)
+        seg = seg.astype(np.int64)
         seg_tensor = torch.from_numpy(seg)
 
         # One-hot encoding on the segmentation mask
@@ -100,19 +117,40 @@ class HipMRIDataset2D(Dataset):
         return img_tensor, seg_onehot_tensor, key_tensor 
 
 
+def get_dataloaders(root, batch_size, num_workers=0):
+    # Get all paths
+    train_img = os.path.join(root, "keras_slices_train")
+    train_seg = os.path.join(root, "keras_slices_seg_train")
+    validate_img = os.path.join(root, "keras_slices_validate")
+    validate_seg = os.path.join(root, "keras_slices_seg_validate")
+    test_img = os.path.join(root, "keras_slices_test")
+    test_seg = os.path.join(root, "keras_slices_seg_test")
 
+    # Get all img-seg pairs
+    train_pairs = build_img_seg_pairs(train_img, train_seg)
+    validate_pairs = build_img_seg_pairs(validate_img, validate_seg)
+    test_pairs = build_img_seg_pairs(test_img, test_seg)
 
+    # Find number of classes
+    num_classes = get_seg_classes(train_seg) 
 
+    # Build datasets
+    train_dataset = HipMRIDataset2D(train_pairs, num_classes)
+    validate_dataset = HipMRIDataset2D(validate_pairs, num_classes)
+    test_dataset = HipMRIDataset2D(test_pairs, num_classes)
 
+    # Build the data loaders
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+    validate_dataloader = DataLoader(validate_dataset, batch_size=batch_size, num_workers=num_workers)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+
+    return train_dataloader, validate_dataloader, test_dataloader, num_classes
 
 
 
 if __name__ == "__main__":
-    IMAGE_DIR = r"Dataset\keras_slices_data\keras_slices_validate"
-    SEG_DIR = r"Dataset\keras_slices_data\keras_slices_seg_validate"
-
-    pairs = build_img_seg_pairs(IMAGE_DIR, SEG_DIR)
-    num_classes = get_seg_classes(SEG_DIR)
-
-    train_dataset = HipMRIDataset2D(pairs, num_classes)
-    img, seg, key = train_dataset[0]
+    train, validate, test, num_classes = get_dataloaders(ROOT, 8)
+    print(len(train.dataset), len(validate.dataset), len(test.dataset))   # expect 11400 660 540
+    img, mask, key = next(iter(train))
+    print(img.shape, mask.shape, key.shape)   # [8,1,256,128] [8,6,256,128] [8,3]
+    print(mask.sum(dim=1).unique())           # tensor([1.])
