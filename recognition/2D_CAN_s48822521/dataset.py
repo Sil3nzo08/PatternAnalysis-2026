@@ -28,12 +28,18 @@ def build_img_seg_pairs(img_dir, seg_dir):
     Returns a dictionary that uses (patient, week, slice) as the key, and the value being a tuple (image, segment).
     """
 
-    img_seg_pairs = {}
-    img_files = sorted(os.listdir(img_dir))
-    seg_files = sorted(os.listdir(seg_dir))
+    img_files = sorted(os.listdir(img_dir), key=extract_key)
+    seg_files = sorted(os.listdir(seg_dir), key=extract_key)
 
+    # Should be same, as we're relying on indices to pair them up
+    assert len(img_files) == len(seg_files), "not same file count between images and masks" 
+
+    img_seg_pairs = {}
     for i in range(len(img_files)):
-        img_seg_pairs[extract_key(img_files[i])] = (img_files[i], seg_files[i])
+        full_img_path = os.path.join(img_dir, img_files[i])
+        full_seg_path = os.path.join(seg_dir, seg_files[i])
+
+        img_seg_pairs[extract_key(img_files[i])] =  (full_img_path, full_seg_path)
 
     return img_seg_pairs
 
