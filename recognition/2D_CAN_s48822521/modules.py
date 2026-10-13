@@ -68,8 +68,9 @@ class UpBlock(nn.Module):
     2x2 Up-convolution, then DoubleConv
     """
     def __init__(self, in_channels, out_channels):
+        super().__init__()
         self.up_conv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2) # Stride = 2 to double spatial size
-        self.conv_block = DoubleConv(out_channels, out_channels)
+        self.conv_block = DoubleConv(out_channels * 2, out_channels)
 
     def forward(self, x, skip_connection):
         x = self.up_conv(x)             # (B, out_channels, 2H, 2W)
@@ -81,25 +82,25 @@ class UpBlock(nn.Module):
 
 
 class BasicUNet2D(nn.Module):
-    def __init__(self, in_channels, out_channels, num_classes):
+    def __init__(self, in_channels, base_channels, num_classes):
         super().__init__()
 
         # Encoder stuff
-        self.down_layer1 = DoubleConv(1, 32) # No max-pool at start
-        self.down_layer2 = DownBlock(32, 64) 
-        self.down_layer3 = DownBlock(64, 128)
-        self.down_layer4 = DownBlock(128, 256)
+        self.down_layer1 = DoubleConv(in_channels, base_channels) # No max-pool at start
+        self.down_layer2 = DownBlock(base_channels, base_channels*2) 
+        self.down_layer3 = DownBlock(base_channels*2, base_channels*4)
+        self.down_layer4 = DownBlock(base_channels*4, base_channels*8)
 
-        self.down_layer_bottleneck = DownBlock(256, 512) # At bottle-neck now
+        self.down_layer_bottleneck = DownBlock(base_channels*8, base_channels*16) # At bottle-neck now
 
         # Decoder stuff
-        self.up_layer4 = UpBlock(512, 256)
-        self.up_layer3 = UpBlock(256, 128)
-        self.up_layer2 = UpBlock(128, 64)
-        self.up_layer1 = UpBlock(64, 32)
+        self.up_layer4 = UpBlock(base_channels*16, base_channels*8)
+        self.up_layer3 = UpBlock(base_channels*8, base_channels*4)
+        self.up_layer2 = UpBlock(base_channels*4, base_channels*2)
+        self.up_layer1 = UpBlock(base_channels*2, base_channels)
 
         # Final 1x1 convolution
-        self.final_conv = nn.Conv2d(32, num_classes, kernel_size=1)
+        self.final_conv = nn.Conv2d(base_channels, num_classes, kernel_size=1)
 
     def forward(self, x):
         # Encoder
