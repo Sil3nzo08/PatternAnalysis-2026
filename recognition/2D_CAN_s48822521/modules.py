@@ -63,14 +63,57 @@ class DownBlock(nn.Module):
     def forward(self, x):
         return self.conv_block(self.max_pool(x))
 
+class UpBlock(nn.Module):
+    """
+    2x2 Up-convolution, then DoubleConv
+    """
+    def __init__(self, in_channels, out_channels):
+        self.up_conv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2) # Stride = 2 to double spatial size
+        self.conv_block = DoubleConv(out_channels, out_channels)
+
+    def forward(self, x, skip_connection):
+        x = self.up_conv(x)             # (B, out_channels, 2H, 2W)
+
+        # From diagram, looks like the copied info is first, then we concatenate current info, x, onto its end. Same channels as x after up-convolution is applied, so we have double the out_channels.
+        x = torch.cat([skip_connection, x], dim=1) # (B, out_channels*2, 2H, 2W)
+
+        return self.conv_block(x)   # (B, out_channels, 2H, 2W)
+
 
 class BasicUNet2D(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, num_classes):
         super().__init__()
 
         # Encoder stuff
-        self.start = DoubleConv(1, 32) # No max-pool at start
-        self.down_layer1 = DownBlock(32, 64) 
-        self.down_layer2 = DownBlock(64, 128)
-        self.down_layer3 = DownBlock(128, 256)
-        self.down_layer4 = DownBlock(256, 512) # At bottle-neck now
+        self.down_layer1 = DoubleConv(1, 32) # No max-pool at start
+        self.down_layer2 = DownBlock(32, 64) 
+        self.down_layer3 = DownBlock(64, 128)
+        self.down_layer4 = DownBlock(128, 256)
+
+        self.down_layer_bottleneck = DownBlock(256, 512) # At bottle-neck now
+
+        # Decoder stuff
+        self.up_layer4 = UpBlock(512, 256)
+        self.up_layer3 = UpBlock(256, 128)
+        self.up_layer2 = UpBlock(128, 64)
+        self.up_layer1 = UpBlock(64, 32)
+
+        # Final 1x1 convolution
+        self.final_conv = nn.Conv2d(32, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        # Encoder
+        skip_connection1 = self.down_layer1(x)
+        skip_connection2 = self.down_layer2(skip_connection1)
+        skip_connection3 = self.down_layer3(skip_connection2)
+        skip_connection4 = self.down_layer4(skip_connection3)
+
+        bottleneck = self.down_layer_bottleneck(skip_connection4)
+
+        # Decoder
+        dec4 = self.up_layer4(bottleneck, skip_connection4)
+        dec3 = self.up_layer3(dec4, skip_connection3)
+        dec2 = self.up_layer2(dec3, skip_connection2)
+        dec1 = self.up_layer1(dec2, skip_connection1)
+
+        return self.final_conv(dec1)
