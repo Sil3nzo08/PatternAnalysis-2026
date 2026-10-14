@@ -2,6 +2,8 @@
 PURPOSE: Containing the source code for training, validating, testing, and saving your model. The model should be imported from modules.py and the data loader should be imported from dataset.py. Make sure to plot the losses and metrics during training.
 """
 
+from torch.utils.data import DataLoader
+
 import torch
 import torch.nn.functional as F
 import modules
@@ -18,40 +20,35 @@ def calculate_dice_loss(predictions, labels, eps=1e-6):
     numerator = (prediction_probs * labels).sum(dim=(0, 2, 3))
     denominator = prediction_probs.sum(dim=(0, 2, 3)) + labels.sum(dim=(0, 2, 3))
 
-    sum = (2*numerator + eps) / (denominator + eps) # Per class dice
-    multi_class_dice_loss = 1 - sum.mean() # mean() for the dividing by |K| classes
+    sum_dice = (2*numerator + eps) / (denominator + eps) # Per class dice
+    multi_class_dice_loss = 1 - sum_dice.mean() # mean() for the dividing by |K| classes
 
     return multi_class_dice_loss
 
-def calculate_dice_per_channel(predictions, labels, num_classes, eps=1e-6):
+def calculate_dice_components(predictions, labels, num_classes):
     """
-    Dice coefficient (DSC) per class/channel (1.0 = perfect match, 0.0 means no overlap)
+    Returns the overlap and total counts, so you can calculate dice coefficient and IoU 
     Prediction and label are of form (B, C, H, W)
     Label targets are one-hot
+
+    Dice coefficient (DSC) per class/channel (1.0 = perfect match, 0.0 means no overlap)
     """
     prediction_answers = predictions.argmax(dim=1) # Picks the class with the highest score (and stores the classID as the entries)
-    predictions_onehot = F.one_hot(prediction_answers, num_classes).permute(0, 3, 1, 2).float() # Convert classIDs to one-hot entries, also (B, 256, 128, 6) -> (B, 6, 128, 256)
+    predictions_onehot = F.one_hot(prediction_answers, num_classes).permute(0, 3, 1, 2).float() # Convert classIDs to one-hot entries, also (B, 256, 128, 6) -> (B, 6, 256, 128)
     
+    overlap = (predictions_onehot * labels).sum(dim=(0, 2, 3)) # 1 if both are 1 (1*1), 0 otherwise
+    total = predictions_onehot.sum(dim=(0, 2, 3)) + labels.sum(dim=(0, 2, 3))
 
-    numerator = (predictions_onehot * labels).sum(dim=(0, 2, 3)) # 1 if both are 1 (1*1), 0 otherwise
-    denominator = predictions_onehot.sum(dim=(0, 2, 3)) + labels.sum(dim=(0, 2, 3))
-    dice_coefficient = (2*numerator + eps) / (denominator + eps) # Per class dice
+    return overlap, total
 
-    return dice_coefficient # A tensor with the 6 dice cefficients [DSC for class 0, DSC for class 1, ...]
-
-
-
-
-
-
-def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, num_classes, device):
+def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, model_save_path, device):
     model = model.to(device)
+    training_history = {"Train Loss": [], "Validate Loss": []}
 
-    
     for epoch in range(num_epochs):
 
         # Step 1: Train
-        total_train_loss = 0.0
+        train_loss = 0.0
         model.train()
         for images, masks, _ in train_dataloader:
             images = images.to(device)
@@ -59,14 +56,14 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
             # Forward pass
             outputs = model(images)
-            train_loss = calculate_dice_loss(outputs, masks)
+            loss = calculate_dice_loss(outputs, masks)
 
             # Backpropagation and optimization
             optimizer.zero_grad()   # Reset/clean
-            train_loss.backward()         # Backpropagation
+            loss.backward()         # Backpropagation
             optimizer.step()        # Update weights/gradient descent
 
-            total_train_loss += train_loss.item()
+            train_loss += loss.item()
 
         # Step 2: Validate set evaluation
         validate_loss = 0.0
@@ -78,22 +75,56 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
                 outputs = model(images)
                 validate_loss += calculate_dice_loss(outputs, masks).item()
-                per_class_DSC = calculate_dice_per_channel(outputs, masks, num_classes)
 
-        print(f"epoch: {epoch + 1}/{num_epochs} | train: {total_train_loss / len(train_dataloader)} | validate: {validate_loss / len(validate_dataloader)}")
-        print(per_class_DSC)
+        # Step 3: Record training and validation losses
+        print(f"epoch: {epoch+1}")
+        training_history["Train Loss"].append(train_loss / len(train_dataloader))
+        training_history["Validate Loss"].append(validate_loss / len(validate_dataloader))
+
+    torch.save(model.state_dict(), model_save_path)
+    return training_history
+
+def test_model(model, test_dataloader, num_classes, model_save_path, device, eps=1e-6):
+    """
+    Load model, and report per-class Dice and IoU over the whole test
+    """
+    model.load_state_dict(torch.load(model_save_path))
+    model = model.to(device)
+
+    # Keep a tally/count of all overlap and total so that we can compute dice and IoU per-class at the end
+    overlap = torch.zeros(num_classes, device=device)
+    total = torch.zeros(num_classes, device=device)
+    
+    model.eval()
+    with torch.no_grad():
+        for images, masks, _ in test_dataloader:
+            images = images.to(device)
+            masks = masks.to(device)
+
+            outputs = model(images)
+            new_overlap, new_total = calculate_dice_components(outputs, masks, num_classes)
+
+            overlap += new_overlap
+            total += new_total
+
+    # Calculate dice coefficient and IoU per class
+    dice = (2*overlap + eps) / (total + eps)
+    IoU = (overlap + eps) /(total - overlap + eps)
+    for c in range(num_classes):
+        print(f"{c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
 
 
 
-
-
-
-
-
+############# HYPER-PARAMETERS #############
+learning_rate = 1e-3
+batch_size = 8
+num_epochs = 50
+base_channels = 32
+############################################
 ROOT = r"Dataset\keras_slices_data"
-IMAGE_SHAPE = (256, 128) # Got it from looking inside the data
+UNET_MODEL_PATH = "Basic-U-Net.pt"
 
-from torch.utils.data import Subset, DataLoader
+
 
 if __name__ == "__main__":
     # Device configuration
@@ -101,19 +132,10 @@ if __name__ == "__main__":
     if not torch.cuda.is_available():
         print("Warning CUDA not Found. Using CPU")
 
-    print("Here1")
+    train_dataloader, validate_dataloader, test_dataloader, num_classes = dataset.get_dataloaders(ROOT, batch_size)
 
-    train_dataloader, validate_dataloader, test_dataloader, num_classes = dataset.get_dataloaders(ROOT, 8)
-
-    print("Here2")
-
-    train_small = DataLoader(
-        Subset(train_dataloader.dataset, range(2000, 2064)),
-                         batch_size=8, shuffle=True)
-    val_small = DataLoader(
-        Subset(validate_dataloader.dataset, range(100, 132)),
-                        batch_size=8, shuffle=False)
-
-    model = modules.BasicUNet2D(1, 8, num_classes)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    train_model(model, train_small, val_small, optimizer, 10, num_classes, device)
+    model = modules.BasicUNet2D(1, base_channels, num_classes)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    
+    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, UNET_MODEL_PATH, device)
+    test_model(model, test_dataloader, num_classes, UNET_MODEL_PATH, device)
