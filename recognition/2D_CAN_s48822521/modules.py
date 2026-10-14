@@ -118,3 +118,11 @@ class BasicUNet2D(nn.Module):
         dec1 = self.up_layer1(dec2, skip_connection1)
 
         return self.final_conv(dec1)
+
+
+if __name__ == "__main__":
+    model = BasicUNet2D(in_channels=1, base_channels=32, num_classes=6)
+    x = torch.randn(2, 1, 256, 128)
+    y = model(x)
+    print(y.shape)                                     # torch.Size([2, 6, 256, 128])
+    print(sum(p.numel() for p in model.parameters()))  # roughly 7.8M at base 32
