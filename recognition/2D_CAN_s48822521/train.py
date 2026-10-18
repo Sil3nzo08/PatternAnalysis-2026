@@ -2,7 +2,7 @@
 PURPOSE: Containing the source code for training, validating, testing, and saving your model. The model should be imported from modules.py and the data loader should be imported from dataset.py. Make sure to plot the losses and metrics during training.
 """
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 import torch
 import torch.nn.functional as F
@@ -78,6 +78,8 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
         # Step 3: Record training and validation losses
         print(f"epoch: {epoch+1}")
+        print(f"    train_loss: {train_loss / len(train_dataloader)}")
+        print(f"    validate_loss: {validate_loss / len(validate_dataloader)}")
         training_history["Train Loss"].append(train_loss / len(train_dataloader))
         training_history["Validate Loss"].append(validate_loss / len(validate_dataloader))
 
@@ -118,12 +120,12 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
 ############# HYPER-PARAMETERS #############
 learning_rate = 1e-3
 batch_size = 8
-num_epochs = 50
-base_channels = 32
+num_epochs = 10 #50
+base_channels = 8
 ############################################
 ROOT = r"Dataset\keras_slices_data"
 UNET_MODEL_PATH = "Basic-U-Net.pt"
-
+CAN_MODEL_PATH = "Basic-2D-CAN.pt"
 
 
 if __name__ == "__main__":
@@ -133,9 +135,19 @@ if __name__ == "__main__":
         print("Warning CUDA not Found. Using CPU")
 
     train_dataloader, validate_dataloader, test_dataloader, num_classes = dataset.get_dataloaders(ROOT, batch_size)
+    print("Finished data loading")
 
-    model = modules.BasicUNet2D(1, base_channels, num_classes)
+    ### For testing purposes ###
+    train_small = DataLoader(
+        Subset(train_dataloader.dataset, range(2000, 2064)),
+                         batch_size=8, shuffle=True)
+    val_small = DataLoader(
+        Subset(validate_dataloader.dataset, range(100, 132)),
+                        batch_size=8, shuffle=False)
+
+    model = modules.Basic2DCAN(1, base_channels, num_classes)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, UNET_MODEL_PATH, device)
-    test_model(model, test_dataloader, num_classes, UNET_MODEL_PATH, device)
+    training_history = train_model(model, train_small, val_small, optimizer, num_epochs, CAN_MODEL_PATH, device)
+
+    test_model(model, test_dataloader, num_classes, CAN_MODEL_PATH, device)

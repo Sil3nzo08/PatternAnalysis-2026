@@ -40,10 +40,8 @@ class DoubleConv(nn.Module):
 
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1), # padding=1 to preserve spatial size
-            nn.InstanceNorm2d(out_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.InstanceNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -118,6 +116,79 @@ class BasicUNet2D(nn.Module):
         dec1 = self.up_layer1(dec2, skip_connection1)
 
         return self.final_conv(dec1)
+
+
+
+############## 2D CAN ##############
+class ContextModule(nn.Module):
+    """
+    Following the basic context module structure in the paper.
+    """
+
+    def __init__(self, channels, num_classes):
+        super().__init__()
+
+        # Context Module
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 1
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 2
+        self.conv3 = nn.Conv2d(channels, channels, kernel_size=3, padding=2, dilation=2) # Layer 3
+        self.conv4= nn.Conv2d(channels, channels, kernel_size=3, padding=4, dilation=4) # Layer 4
+        self.conv5 = nn.Conv2d(channels, channels, kernel_size=3, padding=8, dilation=8) # Layer 5
+        self.conv6 = nn.Conv2d(channels, channels, kernel_size=3, padding=16, dilation=16) # Layer 6
+        self.conv7 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 7
+        self.conv8 = nn.Conv2d(channels, num_classes, kernel_size=1) # Layer 8
+
+        self.relu = nn.ReLU(inplace=True)
+
+        # Need the identity initialisation on all convolutions, as per the paper. 
+        nn.init.dirac_(self.conv1.weight)
+        nn.init.zeros_(self.conv1.bias)
+        nn.init.dirac_(self.conv2.weight)
+        nn.init.zeros_(self.conv2.bias)
+        nn.init.dirac_(self.conv3.weight)
+        nn.init.zeros_(self.conv3.bias)
+        nn.init.dirac_(self.conv4.weight)
+        nn.init.zeros_(self.conv4.bias)
+        nn.init.dirac_(self.conv5.weight)
+        nn.init.zeros_(self.conv5.bias)
+        nn.init.dirac_(self.conv6.weight)
+        nn.init.zeros_(self.conv6.bias)
+        nn.init.dirac_(self.conv7.weight)
+        nn.init.zeros_(self.conv7.bias)
+
+    def forward(self, x):
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.relu(self.conv3(x))
+        x = self.relu(self.conv4(x))
+        x = self.relu(self.conv5(x))
+        x = self.relu(self.conv6(x))
+        x = self.relu(self.conv7(x))
+        return self.conv8(x) # Final layer doesn't have ReLU
+
+class Basic2DCAN(nn.Module):
+    """
+    The complete 2D CAN, with a simple convolution front-end that is fed into the context module.
+    """
+    def __init__(self, in_channels, base_channels, num_classes):
+        super().__init__()
+
+        self.front_end = nn.Sequential(
+            nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(base_channels, base_channels*2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(base_channels*2, base_channels*4, kernel_size=3, padding=1),
+            nn.ReLU()
+        )
+
+        self.context_module = ContextModule(base_channels*4, num_classes)
+
+    def forward(self, x):
+        feature_maps = self.front_end(x) # (B, C, 256, 128)
+        return self.context_module(feature_maps) # (B, num_classes, 256, 128)
+
+
 
 
 if __name__ == "__main__":
