@@ -169,6 +169,6 @@ if __name__ == "__main__":
     model = modules.Basic2DCAN(1, args.base_channels, num_classes)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     
-    training_history = train_model(model, train_small, val_small, optimizer, args.num_epochs, args.save_path, device)
+    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device)
 
     test_model(model, test_dataloader, num_classes, args.save_path, device)
