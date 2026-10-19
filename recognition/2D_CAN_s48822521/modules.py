@@ -138,7 +138,7 @@ class ContextModule(nn.Module):
         self.conv7 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 7
         self.conv8 = nn.Conv2d(channels, num_classes, kernel_size=1) # Layer 8
 
-        self.relu = nn.ReLU(inplace=True)
+        self.leaky_relu = nn.LeakyReLU(inplace=True)
 
         # Need the identity initialisation on all convolutions, as per the paper. 
         nn.init.dirac_(self.conv1.weight)
@@ -157,13 +157,13 @@ class ContextModule(nn.Module):
         nn.init.zeros_(self.conv7.bias)
 
     def forward(self, x):
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.relu(self.conv4(x))
-        x = self.relu(self.conv5(x))
-        x = self.relu(self.conv6(x))
-        x = self.relu(self.conv7(x))
+        x = self.leaky_relu(self.conv1(x))
+        x = self.leaky_relu(self.conv2(x))
+        x = self.leaky_relu(self.conv3(x))
+        x = self.leaky_relu(self.conv4(x))
+        x = self.leaky_relu(self.conv5(x))
+        x = self.leaky_relu(self.conv6(x))
+        x = self.leaky_relu(self.conv7(x))
         return self.conv8(x) # Final layer doesn't have ReLU
 
 class Basic2DCAN(nn.Module):
@@ -175,11 +175,11 @@ class Basic2DCAN(nn.Module):
 
         self.front_end = nn.Sequential(
             nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Conv2d(base_channels, base_channels*2, kernel_size=3, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Conv2d(base_channels*2, base_channels*4, kernel_size=3, padding=1),
-            nn.ReLU()
+            nn.LeakyReLU()
         )
 
         self.context_module = ContextModule(base_channels*4, num_classes)

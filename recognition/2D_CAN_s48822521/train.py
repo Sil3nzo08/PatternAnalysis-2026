@@ -2,6 +2,8 @@
 PURPOSE: Containing the source code for training, validating, testing, and saving your model. The model should be imported from modules.py and the data loader should be imported from dataset.py. Make sure to plot the losses and metrics during training.
 """
 
+import time
+
 from torch.utils.data import DataLoader, Subset
 
 import torch
@@ -162,13 +164,19 @@ if __name__ == "__main__":
     train_small = DataLoader(
         Subset(train_dataloader.dataset, range(2000, 2064)),
                          batch_size=8, shuffle=True)
-    val_small = DataLoader(
+    validate_small = DataLoader(
         Subset(validate_dataloader.dataset, range(100, 132)),
                         batch_size=8, shuffle=False)
+    ############################
 
     model = modules.Basic2DCAN(1, args.base_channels, num_classes)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    
+
+    start_time = time.time()
     training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device)
+    end_time = time.time()
+
+    time_elapsed = end_time - start_time
+    print(f"Total training time: {time_elapsed/60} minutes")
 
     test_model(model, test_dataloader, num_classes, args.save_path, device)

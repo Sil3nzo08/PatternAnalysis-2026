@@ -1,4 +1,4 @@
 /Dataset
-/.vscode
 /__pycache__
 *.pt
+.vscode/
