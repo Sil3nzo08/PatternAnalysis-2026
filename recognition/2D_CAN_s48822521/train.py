@@ -210,7 +210,7 @@ if __name__ == "__main__":
     model = modules.Basic2DCAN(1, args.base_channels, num_classes)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    print(f"params: lr={args.lr}, batch_size={batch_size}, num_epoch={num_epochs}, base_channels={base_channels}")
+    print(f"params: lr={args.lr}, batch_size={args.batch_size}, num_epoch={args.num_epochs}, base_channels={args.base_channels}")
 
     start_time = time.time()
     training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
