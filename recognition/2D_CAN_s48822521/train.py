@@ -113,7 +113,7 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
         print("-------- per-class -----------")
         for c in range(num_classes):
             if total[c] == 0:
-                print(f"    - {c}: dice coefficient: N/A | IoU: N/A (absent from test labels and predictions)")
+                print(f"    - {c}: dice coefficient: N/A | IoU: N/A (absent from validation labels and predictions)")
                 continue
 
             print(f"    - {c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
@@ -210,8 +210,10 @@ if __name__ == "__main__":
     model = modules.Basic2DCAN(1, args.base_channels, num_classes)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    print(f"params: lr={args.lr}, batch_size={batch_size}, num_epoch={num_epochs}, base_channels={base_channels}")
+
     start_time = time.time()
-    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.time()
 
     time_elapsed = end_time - start_time
