@@ -45,10 +45,12 @@ def calculate_dice_components(predictions, labels, num_classes):
 
     return overlap, total
 
-def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, model_save_path, device):
+def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, model_save_path, device, num_classes, eps=1e-6):
     model = model.to(device)
     training_history = {"Train Loss": [], "Validate Loss": []}
+    best_validation_loss = float("inf")
 
+    step = 0
     for epoch in range(num_epochs):
 
         # Step 1: Train
@@ -65,11 +67,21 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
             # Backpropagation and optimization
             optimizer.zero_grad()   # Reset/clean
             loss.backward()         # Backpropagation
+
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if step % 100 == 0 or grad_norm > 10:
+                print(f"step {step} loss {loss.item():.3f} grad_norm {grad_norm:.2f} "
+                    f"max_logit {outputs.abs().max().item():.1f}")
+
             optimizer.step()        # Update weights/gradient descent
+            step += 1
 
             train_loss += loss.item()
 
         # Step 2: Validate set evaluation
+        overlap = torch.zeros(num_classes, device=device)
+        total = torch.zeros(num_classes, device=device)
+
         validate_loss = 0.0
         model.eval()
         with torch.no_grad():
@@ -80,14 +92,40 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
                 outputs = model(images)
                 validate_loss += calculate_dice_loss(outputs, masks).item()
 
-        # Step 3: Record training and validation losses
-        print(f"epoch: {epoch+1}")
-        print(f"    train_loss: {train_loss / len(train_dataloader)}")
-        print(f"    validate_loss: {validate_loss / len(validate_dataloader)}")
-        training_history["Train Loss"].append(train_loss / len(train_dataloader))
-        training_history["Validate Loss"].append(validate_loss / len(validate_dataloader))
+                new_overlap, new_total = calculate_dice_components(outputs, masks, num_classes)
+                
+                overlap += new_overlap
+                total += new_total
 
-    torch.save(model.state_dict(), model_save_path)
+        # Step 3: Record training and validation losses
+        avg_training_loss = train_loss / len(train_dataloader)
+        avg_validate_loss = validate_loss / len(validate_dataloader)
+        training_history["Train Loss"].append(avg_training_loss)
+        training_history["Validate Loss"].append(avg_validate_loss)
+
+        print(f"epoch: {epoch+1}")
+        print(f"    - train_loss: {train_loss / len(train_dataloader)}")
+        print(f"    - validate_loss: {validate_loss / len(validate_dataloader)}")
+
+        # Calculate dice coefficient and IoU per class
+        dice = (2*overlap + eps) / (total + eps)
+        IoU = (overlap + eps) /(total - overlap + eps)
+        print("-------- per-class -----------")
+        for c in range(num_classes):
+            if total[c] == 0:
+                print(f"    - {c}: dice coefficient: N/A | IoU: N/A (absent from test labels and predictions)")
+                continue
+
+            print(f"    - {c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
+        print("-----------------------------")
+        
+        
+        # Step 4: Store the model if it's the best seen so far
+        if (best_validation_loss > avg_validate_loss):
+            print(f"    - Saving for {avg_validate_loss}")
+            best_validation_loss = avg_validate_loss
+            torch.save(model.state_dict(), model_save_path)
+
     return training_history
 
 def test_model(model, test_dataloader, num_classes, model_save_path, device, eps=1e-6):
@@ -122,7 +160,7 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
 
 
 ############# HYPER-PARAMETERS #############
-learning_rate = 1e-3
+learning_rate = 1e-4
 batch_size = 8
 num_epochs = 10 # 50 for real
 base_channels = 8 # 32 for real
@@ -173,7 +211,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     start_time = time.time()
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device)
+    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.time()
 
     time_elapsed = end_time - start_time

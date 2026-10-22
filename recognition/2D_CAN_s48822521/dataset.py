@@ -53,8 +53,9 @@ def build_img_seg_pairs(img_dir, seg_dir):
         assert extract_key(img_files[i]) == extract_key(seg_files[i]), "Mismatched key between images and masks" 
 
         # There was this like couple of datafiles that had a different shape, (256, 144), so decided to remove them from training set (didn't appear in validation nor test sets so we chill)
-        if (nib.load(full_img_path).shape != IMAGE_SHAPE):
-            #print(f"Removed: {extract_key(img_files[i])}")
+        if (nib.load(full_img_path).shape != IMAGE_SHAPE 
+            or nib.load(full_seg_path).shape != IMAGE_SHAPE):
+            # print(f"Removed: {extract_key(img_files[i])}")
             continue
 
         img_seg_pairs[extract_key(img_files[i])] =  (full_img_path, full_seg_path)
