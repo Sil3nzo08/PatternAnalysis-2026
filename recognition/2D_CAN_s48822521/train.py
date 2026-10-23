@@ -88,7 +88,7 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
             # Forward pass
             outputs = model(images)
-            loss = calculate_dice_CE_loss(outputs, masks)
+            loss = calculate_dice_loss(outputs, masks)
 
             # Backpropagation and optimization
             optimizer.zero_grad()   # Reset/clean
@@ -275,7 +275,7 @@ if __name__ == "__main__":
     print(f"params: lr={args.lr}, batch_size={args.batch_size}, num_epoch={args.num_epochs}, base_channels={args.base_channels}")
 
     start_time = time.time()
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.time()
 
     time_elapsed = end_time - start_time
