@@ -29,6 +29,32 @@ def calculate_dice_loss(predictions, labels, eps=1e-6):
 
     return multi_class_dice_loss
 
+def calculate_dice_CE_loss(predictions, labels, dice_weight=0.5, eps=1e-6):
+    """
+    Multi-class dice + cross-entropy loss. 
+    Prediction and label are of form (B, C, H, W)
+    Label targets are one-hot
+    """
+    ######################### For Dice Loss #########################
+    prediction_probs = torch.softmax(predictions, dim=1)
+
+    numerator = (prediction_probs * labels).sum(dim=(0, 2, 3))
+    denominator = prediction_probs.sum(dim=(0, 2, 3)) + labels.sum(dim=(0, 2, 3))
+
+    sum_dice = (2*numerator + eps) / (denominator + eps) # Per class dice
+    multi_class_dice_loss = 1 - sum_dice.mean() # mean() for the dividing by |K| classes 
+
+    ##################################################################
+
+    ################ For Cross Entropy Loss ################
+    class_targets = labels.argmax(dim=1)
+    cross_entropy_loss = F.cross_entropy(predictions, class_targets)
+    ########################################################
+
+    total_loss = dice_weight*multi_class_dice_loss + (1-dice_weight)*cross_entropy_loss
+
+    return total_loss
+
 def calculate_dice_components(predictions, labels, num_classes):
     """
     Returns the overlap and total counts, so you can calculate dice coefficient and IoU 
@@ -62,7 +88,7 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
             # Forward pass
             outputs = model(images)
-            loss = calculate_dice_loss(outputs, masks)
+            loss = calculate_dice_CE_loss(outputs, masks)
 
             # Backpropagation and optimization
             optimizer.zero_grad()   # Reset/clean
@@ -135,6 +161,11 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     model.load_state_dict(torch.load(model_save_path))
     model = model.to(device)
 
+    # Check class 5 is actually being recognized by model
+    print_class_pixel_counts(model, train_dataloader, num_classes, device, "train")
+    print_class_pixel_counts(model, validate_dataloader, num_classes, device, "validation")
+
+
     # Keep a tally/count of all overlap and total so that we can compute dice and IoU per-class at the end
     overlap = torch.zeros(num_classes, device=device)
     total = torch.zeros(num_classes, device=device)
@@ -157,12 +188,43 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     for c in range(num_classes):
         print(f"{c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
 
+def print_class_pixel_counts(model, dataloader, num_classes, device, split_name):
+    actual_pixels = torch.zeros(num_classes, device=device, dtype=torch.long)
+    predicted_pixels = torch.zeros(num_classes, device=device, dtype=torch.long)
+
+    model.eval()
+    with torch.no_grad():
+        for images, masks, _ in dataloader:
+            images = images.to(device)
+            masks = masks.to(device)
+
+            outputs = model(images)
+            predicted_classes = outputs.argmax(dim=1)
+
+            actual_pixels += masks.sum(dim=(0, 2, 3)).long()
+            predicted_pixels += torch.bincount(
+                predicted_classes.reshape(-1),
+                minlength=num_classes,
+            )
+
+    print(f"--- {split_name} class pixel counts ---")
+    for class_id in range(num_classes):
+        print(
+            f"class {class_id}: "
+            f"actual={actual_pixels[class_id].item():,}, "
+            f"predicted={predicted_pixels[class_id].item():,}"
+        )
+
+
+
+
+
 
 
 ############# HYPER-PARAMETERS #############
 learning_rate = 1e-4
-batch_size = 8
-num_epochs = 10 # 50 for real
+batch_size = 16
+num_epochs = 50 # 50 for real
 base_channels = 8 # 32 for real
 ############################################
 ROOT = r"Dataset\keras_slices_data"
@@ -213,7 +275,7 @@ if __name__ == "__main__":
     print(f"params: lr={args.lr}, batch_size={args.batch_size}, num_epoch={args.num_epochs}, base_channels={args.base_channels}")
 
     start_time = time.time()
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.time()
 
     time_elapsed = end_time - start_time

@@ -130,12 +130,26 @@ class ContextModule(nn.Module):
 
         # Context Module
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 1
+        self.bn1 = nn.BatchNorm2d(channels)
+
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 2
+        self.bn2 = nn.BatchNorm2d(channels)
+
         self.conv3 = nn.Conv2d(channels, channels, kernel_size=3, padding=2, dilation=2) # Layer 3
+        self.bn3 = nn.BatchNorm2d(channels)
+
         self.conv4= nn.Conv2d(channels, channels, kernel_size=3, padding=4, dilation=4) # Layer 4
+        self.bn4 = nn.BatchNorm2d(channels)
+
         self.conv5 = nn.Conv2d(channels, channels, kernel_size=3, padding=8, dilation=8) # Layer 5
+        self.bn5 = nn.BatchNorm2d(channels)
+
         self.conv6 = nn.Conv2d(channels, channels, kernel_size=3, padding=16, dilation=16) # Layer 6
+        self.bn6 = nn.BatchNorm2d(channels)
+
         self.conv7 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, dilation=1) # Layer 7
+        self.bn7 = nn.BatchNorm2d(channels)
+
         self.conv8 = nn.Conv2d(channels, num_classes, kernel_size=1) # Layer 8
 
         self.leaky_relu = nn.LeakyReLU(inplace=True)
@@ -157,13 +171,13 @@ class ContextModule(nn.Module):
         nn.init.zeros_(self.conv7.bias)
 
     def forward(self, x):
-        x = self.leaky_relu(self.conv1(x))
-        x = self.leaky_relu(self.conv2(x))
-        x = self.leaky_relu(self.conv3(x))
-        x = self.leaky_relu(self.conv4(x))
-        x = self.leaky_relu(self.conv5(x))
-        x = self.leaky_relu(self.conv6(x))
-        x = self.leaky_relu(self.conv7(x))
+        x = self.leaky_relu(self.bn1(self.conv1(x)))
+        x = self.leaky_relu(self.bn2(self.conv2(x)))
+        x = self.leaky_relu(self.bn3(self.conv3(x)))
+        x = self.leaky_relu(self.bn4(self.conv4(x)))
+        x = self.leaky_relu(self.bn5(self.conv5(x)))
+        x = self.leaky_relu(self.bn6(self.conv6(x)))
+        x = self.leaky_relu(self.bn7(self.conv7(x)))
         return self.conv8(x) # Final layer doesn't have ReLU
 
 class Basic2DCAN(nn.Module):
