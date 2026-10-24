@@ -11,6 +11,9 @@ import torch.nn.functional as F
 import modules
 import dataset
 
+import numpy as np
+from scipy import ndimage as ndi
+
 import argparse
 
 def calculate_dice_loss(predictions, labels, eps=1e-6):
@@ -143,6 +146,10 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     overlap = torch.zeros(num_classes, device=device)
     total = torch.zeros(num_classes, device=device)
 
+    # For boundary F1 score tracking
+    boundary_score_sums = np.zeros(num_classes, dtype=np.float64)
+    boundary_score_count = np.zeros(num_classes, dtype=np.int64)
+
     ### For calculating per class dice coefficint and IoU
     model.eval()
     with torch.inference_mode():
@@ -156,11 +163,20 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
             overlap += new_overlap
             total += new_total
 
-    # Calculate dice coefficient and IoU per class
+            # BF score calculations
+            batch_sums, batch_counts = calculate_bf_score(outputs, masks, num_classes)
+
+            boundary_score_sums += batch_sums
+            boundary_score_count += batch_counts
+
+
+    # Calculate dice coefficient + IoU + BF score per class
     dice = (2*overlap + eps) / (total + eps)
     IoU = (overlap + eps) /(total - overlap + eps)
+    bf_score = np.divide(boundary_score_sums, boundary_score_count)
+
     for c in range(num_classes):
-        print(f"{c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
+        print(f"{c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()} | BF score: {bf_score[c]}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
 
 
     ### For Peak VRAM and per-case inference time
@@ -216,6 +232,55 @@ def print_class_pixel_counts(model, dataloader, num_classes, device, split_name)
             f"actual={actual_pixels[class_id].item():,}, "
             f"predicted={predicted_pixels[class_id].item():,}"
         )
+
+def calculate_bf_score(predictions, labels, num_classes, distance_threshold=2):
+    """
+    Computer per-image boundary F1 scores for a batch
+    """
+    
+    prediction_IDs = predictions.argmax(dim=1).detach().cpu().numpy()
+    label_IDs = labels.argmax(dim=1).detach().cpu().numpy()
+
+    accumulative_bf_scores = np.zeros(num_classes, dtype=np.float64)
+    score_counts = np.zeros(num_classes, dtype=np.int64)
+
+    for class_id in range(0, num_classes):
+        for batch_index in range(prediction_IDs.shape[0]):
+            prediction_binary_mask = (prediction_IDs[batch_index] == class_id) # "is each pixel in this segmentation mask predicted to be class 'class_id'"
+            label_binary_mask = (label_IDs[batch_index] == class_id) # "is each pixel in this segmentation mask actually class 'class_id'"
+
+            prediction_edge = prediction_binary_mask & ~ndi.binary_erosion(prediction_binary_mask)
+            label_edge = label_binary_mask & ~ndi.binary_erosion(label_binary_mask)
+
+
+            score = None
+            if prediction_edge.sum() == 0 and label_edge.sum() == 0:
+                # Class not in either, so ignore
+                continue
+            elif prediction_edge.sum() == 0 or label_edge.sum() == 0:
+                # Class in one but not the other, so score is 0
+                score = 0.0
+            else:
+                dist_to_label = ndi.distance_transform_edt(~label_edge)
+                dist_to_prediction = ndi.distance_transform_edt(~prediction_edge)
+
+                precision = (dist_to_label[prediction_edge] <= distance_threshold).mean()
+                recall = (dist_to_prediction[label_edge] <= distance_threshold).mean()
+
+                if (precision + recall > 0):
+                    score = (2 * precision * recall) / (precision + recall) 
+                else:
+                    score = 0.0
+
+            accumulative_bf_scores[class_id] += score
+            score_counts[class_id] += 1
+
+    return accumulative_bf_scores, score_counts
+
+
+
+
+
 
 
 
@@ -288,7 +353,7 @@ if __name__ == "__main__":
 
     # Training
     start_time = time.perf_counter()
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.perf_counter()
 
     time_elapsed = end_time - start_time
@@ -296,4 +361,3 @@ if __name__ == "__main__":
 
     # Testing
     test_model(model, test_dataloader, num_classes, args.save_path, device)
-
