@@ -29,31 +29,6 @@ def calculate_dice_loss(predictions, labels, eps=1e-6):
 
     return multi_class_dice_loss
 
-def calculate_dice_CE_loss(predictions, labels, dice_weight=0.5, eps=1e-6):
-    """
-    Multi-class dice + cross-entropy loss. 
-    Prediction and label are of form (B, C, H, W)
-    Label targets are one-hot
-    """
-    ######################### For Dice Loss #########################
-    prediction_probs = torch.softmax(predictions, dim=1)
-
-    numerator = (prediction_probs * labels).sum(dim=(0, 2, 3))
-    denominator = prediction_probs.sum(dim=(0, 2, 3)) + labels.sum(dim=(0, 2, 3))
-
-    sum_dice = (2*numerator + eps) / (denominator + eps) # Per class dice
-    multi_class_dice_loss = 1 - sum_dice.mean() # mean() for the dividing by |K| classes 
-
-    ##################################################################
-
-    ################ For Cross Entropy Loss ################
-    class_targets = labels.argmax(dim=1)
-    cross_entropy_loss = F.cross_entropy(predictions, class_targets)
-    ########################################################
-
-    total_loss = dice_weight*multi_class_dice_loss + (1-dice_weight)*cross_entropy_loss
-
-    return total_loss
 
 def calculate_dice_components(predictions, labels, num_classes):
     """
@@ -71,12 +46,12 @@ def calculate_dice_components(predictions, labels, num_classes):
 
     return overlap, total
 
+
 def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, model_save_path, device, num_classes, eps=1e-6):
     model = model.to(device)
     training_history = {"Train Loss": [], "Validate Loss": []}
     best_validation_loss = float("inf")
 
-    step = 0
     for epoch in range(num_epochs):
 
         # Step 1: Train
@@ -93,14 +68,7 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
             # Backpropagation and optimization
             optimizer.zero_grad()   # Reset/clean
             loss.backward()         # Backpropagation
-
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            if step % 100 == 0 or grad_norm > 10:
-                print(f"step {step} loss {loss.item():.3f} grad_norm {grad_norm:.2f} "
-                    f"max_logit {outputs.abs().max().item():.1f}")
-
             optimizer.step()        # Update weights/gradient descent
-            step += 1
 
             train_loss += loss.item()
 
@@ -154,6 +122,7 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
     return training_history
 
+
 def test_model(model, test_dataloader, num_classes, model_save_path, device, eps=1e-6):
     """
     Load model, and report per-class Dice and IoU over the whole test
@@ -164,7 +133,6 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     # Check class 5 is actually being recognized by model
     print_class_pixel_counts(model, train_dataloader, num_classes, device, "train")
     print_class_pixel_counts(model, validate_dataloader, num_classes, device, "validation")
-
 
     # Keep a tally/count of all overlap and total so that we can compute dice and IoU per-class at the end
     overlap = torch.zeros(num_classes, device=device)
@@ -234,6 +202,9 @@ CAN_MODEL_PATH = "Basic-2D-CAN.pt"
 def parse_args():
     parser = argparse.ArgumentParser()
 
+    # Model choice
+    parser.add_argument("--model", choices = ("2D CAN", "2D U-Net"), default = "2D CAN")
+
     # File IO
     parser.add_argument("--data_dir", default = ROOT)
     parser.add_argument("--save_path", default = CAN_MODEL_PATH)
@@ -269,16 +240,26 @@ if __name__ == "__main__":
                         batch_size=8, shuffle=False)
     ############################
 
-    model = modules.Basic2DCAN(1, args.base_channels, num_classes)
+    # Initialising model
+    model = None
+    if (args.model == "2D CAN"):
+        model = modules.Basic2DCAN(1, args.base_channels, num_classes)
+    elif (args.model == "2D U-Net"):
+        model = modules.BasicUNet2D(1, args.base_channels, num_classes)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    print(f"chosen model: {args.model}")
     print(f"params: lr={args.lr}, batch_size={args.batch_size}, num_epoch={args.num_epochs}, base_channels={args.base_channels}")
 
+    # Training
     start_time = time.time()
-    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.time()
 
     time_elapsed = end_time - start_time
     print(f"Total training time: {time_elapsed/60} minutes")
 
+    # Testing
     test_model(model, test_dataloader, num_classes, args.save_path, device)
+

@@ -40,9 +40,11 @@ class DoubleConv(nn.Module):
 
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1), # padding=1 to preserve spatial size
-            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.ReLU(inplace=True)
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(inplace=True)
         )
 
     def forward(self, x):
