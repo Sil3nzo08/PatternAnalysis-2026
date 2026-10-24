@@ -19,9 +19,13 @@ import os
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+import random
+from scipy import ndimage as ndi
 
 ROOT = r"Dataset\keras_slices_data"
 IMAGE_SHAPE = (256, 128) # Got it from looking inside the data
+FLIP_CHANCE = 0.4
+
 
 
 def extract_key(name: str):
@@ -74,12 +78,30 @@ def get_seg_classes(seg_dir):
 
     return len(labelIDs)
 
+def enforce_patient_level_splitting(train_pairs, validate_pairs, test_pairs):
+    """
+    Ensures there is no data leakage across the 3 sets. Should be called before we start building the datasets and dataloader
+    """
+    train_set = set(key[0] for key in train_pairs.keys())
+    validate_set = set(key[0] for key in validate_pairs.keys())
+    test_set = set(key[0] for key in test_pairs.keys())
+    
+    if (train_set & validate_set != set()) or (validate_set & test_set != set()) or (train_set & test_set != set()):
+        raise ValueError("Patient-level leakage detected between training/validate/test splitting")
+    else:
+        print("No patient-level data leakage!")
+
+
+
+
+
 
 class HipMRIDataset2D(Dataset):
-    def __init__(self, pairs, num_classes):
+    def __init__(self, pairs, num_classes, augmentationEnabled = False):
         self.pairs = pairs
         self.keys = list(pairs.keys()) # Already in order/sorted thanks to dictionary's order
         self.num_classes = num_classes
+        self.augmentationEnabled = augmentationEnabled
 
     def __len__(self):
         return len(self.pairs)
@@ -87,29 +109,39 @@ class HipMRIDataset2D(Dataset):
     def __getitem__(self, i):
         img_path, seg_path = self.pairs[self.keys[i]]
 
-        # Load MRI Slice
+        # Load image and segmentation label
         img = nib.load(img_path).get_fdata(caching='unchanged') # (256, 128)
         img = img.astype(np.float32) # PyTorch expects float32, not float64
+        seg = nib.load(seg_path).get_fdata(caching='unchanged') # (256, 128)
+        seg = seg.astype(np.int64)
 
         # z-score normalisation for the image
         img_mean = img.mean()
         img_std = img.std() + 1e-8 # "+ 1e-8" To avoid divide by 0 error
         img = (img - img_mean) / img_std
 
-        # Convert to tensor (add channel/class axis)
+        # Data augmentation
+        if (self.augmentationEnabled):
+            # Random flips (FLIP_CHANCE of doing it)
+            if random.random() < FLIP_CHANCE:
+                # Flip with respect to the horizontal line
+                img = np.flip(img, axis=0).copy()
+                seg = np.flip(seg, axis=0).copy()
+
+            # Random slight rotations (-15 to 15 degrees)
+            random_angle = np.random.uniform(-15, 15)
+            img = ndi.rotate(img, random_angle, order=1, reshape=False, mode="constant", cval=0.0, prefilter=False)
+            seg = ndi.rotate(seg, random_angle, order=0, reshape=False, mode="constant", cval=0.0, prefilter=False)
+
+        # Convert image to tensor (add channel/class axis)
         img_tensor = torch.from_numpy(img).unsqueeze(0) # (256, 128) -> (1, 256, 128)
 
-
-
-        # Load segmentation label
-        seg = nib.load(seg_path).get_fdata(caching='unchanged') # (256, 128)
-        seg = seg.astype(np.int64)
+        # Convert segmentation label to tensor
         seg_tensor = torch.from_numpy(seg)
 
         # One-hot encoding on the segmentation mask
         seg_onehot_tensor = F.one_hot(seg_tensor, num_classes=self.num_classes) # (256, 128, 6)
         seg_onehot_tensor = seg_onehot_tensor.permute(2, 0, 1).float() # (256, 128, 6) -> (6, 256, 128)
-
 
         # Key, if needed while in the loops of the dataset
         key_tensor = torch.tensor(self.keys[i])
@@ -132,13 +164,16 @@ def get_dataloaders(root, batch_size, num_workers=0):
     validate_pairs = build_img_seg_pairs(validate_img, validate_seg)
     test_pairs = build_img_seg_pairs(test_img, test_seg)
 
+    # Ensure there is patient-level splitting amongst the 3 levels
+    enforce_patient_level_splitting(train_pairs, validate_pairs, test_pairs)
+
     # Find number of classes
     num_classes = get_seg_classes(train_seg) 
 
     # Build datasets
-    train_dataset = HipMRIDataset2D(train_pairs, num_classes)
-    validate_dataset = HipMRIDataset2D(validate_pairs, num_classes)
-    test_dataset = HipMRIDataset2D(test_pairs, num_classes)
+    train_dataset = HipMRIDataset2D(train_pairs, num_classes, augmentationEnabled=True)
+    validate_dataset = HipMRIDataset2D(validate_pairs, num_classes, augmentationEnabled=False)
+    test_dataset = HipMRIDataset2D(test_pairs, num_classes, augmentationEnabled=False)
 
     # Build the data loaders
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)

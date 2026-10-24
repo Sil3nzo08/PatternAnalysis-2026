@@ -279,15 +279,6 @@ def calculate_bf_score(predictions, labels, num_classes, distance_threshold=2):
 
 
 
-
-
-
-
-
-
-
-
-
 ############# HYPER-PARAMETERS #############
 learning_rate = 1e-4
 batch_size = 16
@@ -353,7 +344,7 @@ if __name__ == "__main__":
 
     # Training
     start_time = time.perf_counter()
-    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
     end_time = time.perf_counter()
 
     time_elapsed = end_time - start_time
