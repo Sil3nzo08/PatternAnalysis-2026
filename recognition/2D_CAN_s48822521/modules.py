@@ -213,3 +213,9 @@ if __name__ == "__main__":
     y = model(x)
     print(y.shape)                                     # torch.Size([2, 6, 256, 128])
     print(sum(p.numel() for p in model.parameters()))  # roughly 7.8M at base 32
+
+    model = Basic2DCAN(in_channels=1, base_channels=32, num_classes=6)
+    x = torch.randn(2, 1, 256, 128)
+    y = model(x)
+    print(y.shape)                                     # torch.Size([2, 6, 256, 128])
+    print(sum(p.numel() for p in model.parameters()))  # roughly 11.3M at base 32

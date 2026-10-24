@@ -97,28 +97,31 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
         training_history["Train Loss"].append(avg_training_loss)
         training_history["Validate Loss"].append(avg_validate_loss)
 
+        print("=========================================")
         print(f"epoch: {epoch+1}")
-        print(f"    - train_loss: {train_loss / len(train_dataloader)}")
-        print(f"    - validate_loss: {validate_loss / len(validate_dataloader)}")
+        print(f"\t- train_loss: {train_loss / len(train_dataloader)}")
+        print(f"\t- validate_loss: {validate_loss / len(validate_dataloader)}")
 
         # Calculate dice coefficient and IoU per class
         dice = (2*overlap + eps) / (total + eps)
         IoU = (overlap + eps) /(total - overlap + eps)
-        print("-------- per-class -----------")
+        print("\t-------- per-class -----------")
         for c in range(num_classes):
             if total[c] == 0:
-                print(f"    - {c}: dice coefficient: N/A | IoU: N/A (absent from validation labels and predictions)")
+                print(f"\t\t- {c}: dice coefficient: N/A | IoU: N/A (absent from validation labels and predictions)")
                 continue
 
-            print(f"    - {c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
-        print("-----------------------------")
+            print(f"\t\t- {c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
+        print("\t-----------------------------")
         
         
         # Step 4: Store the model if it's the best seen so far
         if (best_validation_loss > avg_validate_loss):
-            print(f"    - Saving for {avg_validate_loss}")
+            print(f"\t- Saving for {avg_validate_loss}")
             best_validation_loss = avg_validate_loss
             torch.save(model.state_dict(), model_save_path)
+
+        print("=========================================")
 
     return training_history
 
@@ -130,6 +133,8 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     model.load_state_dict(torch.load(model_save_path))
     model = model.to(device)
 
+    print("================ TESTING =========================")
+
     # Check class 5 is actually being recognized by model
     print_class_pixel_counts(model, train_dataloader, num_classes, device, "train")
     print_class_pixel_counts(model, validate_dataloader, num_classes, device, "validation")
@@ -137,9 +142,10 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     # Keep a tally/count of all overlap and total so that we can compute dice and IoU per-class at the end
     overlap = torch.zeros(num_classes, device=device)
     total = torch.zeros(num_classes, device=device)
-    
+
+    ### For calculating per class dice coefficint and IoU
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         for images, masks, _ in test_dataloader:
             images = images.to(device)
             masks = masks.to(device)
@@ -155,6 +161,34 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
     IoU = (overlap + eps) /(total - overlap + eps)
     for c in range(num_classes):
         print(f"{c}: dice coefficient: {dice[c].item()} | IoU: {IoU[c].item()}") # Ideally want both to be 1 (perfect match). 0 means no overlap.
+
+
+    ### For Peak VRAM and per-case inference time
+    profiling_dataloader = DataLoader(test_dataloader.dataset, batch_size=1, num_workers=test_dataloader.num_workers)
+    inference_times = []
+
+    torch.cuda.reset_peak_memory_stats(device)
+
+    with torch.inference_mode():
+        for images, _, _ in profiling_dataloader:
+            images = images.to(device)
+            
+            torch.cuda.synchronize(device)
+            start_time = time.perf_counter()
+            outputs = model(images) 
+            torch.cuda.synchronize(device)
+
+            time_elapsed = time.perf_counter() - start_time
+            inference_times.append(time_elapsed)
+
+    peak_GPU_VRAM = torch.cuda.max_memory_allocated(device) / (1024 ** 2) # in MB
+    avg_inference_time = sum(inference_times) / len(inference_times) # in seconds
+
+    print(f"Peak GPU Vram: {peak_GPU_VRAM} MB")
+    print(f"Average inference time: {avg_inference_time}s")
+
+    print("==================================================")
+
 
 def print_class_pixel_counts(model, dataloader, num_classes, device, split_name):
     actual_pixels = torch.zeros(num_classes, device=device, dtype=torch.long)
@@ -253,9 +287,9 @@ if __name__ == "__main__":
     print(f"params: lr={args.lr}, batch_size={args.batch_size}, num_epoch={args.num_epochs}, base_channels={args.base_channels}")
 
     # Training
-    start_time = time.time()
-    training_history = train_model(model, train_small, validate_small, optimizer, args.num_epochs, args.save_path, device, num_classes)
-    end_time = time.time()
+    start_time = time.perf_counter()
+    training_history = train_model(model, train_dataloader, validate_dataloader, optimizer, args.num_epochs, args.save_path, device, num_classes)
+    end_time = time.perf_counter()
 
     time_elapsed = end_time - start_time
     print(f"Total training time: {time_elapsed/60} minutes")
