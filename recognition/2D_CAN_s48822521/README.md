@@ -16,7 +16,7 @@ contextual information without downsampling feature maps or rescaling the input 
 completely different approach to the U-Net, which relies on successive pooling and subsampling layers to gain 
 context, and then recovers resolution through its decoder and skip connections [2]. 
 
-![Model architecture](Images/2DCAN-Diagram.png)
+![Model architecture](Images/2DCAN_Diagram.png)
 
 ## 2. Feasibility Review
 ### User Need, Scope & Acceptance Criteria
@@ -119,7 +119,7 @@ CAN_STATISTICS = {
     - classID = 4: Rectum
     - classID = 5: Prostate
 
-![Example image](Images/2DCAN-Diagram.png)
+![Example image](Images/patient_40_week_0_slice_3.png)
 
 ## 4. Dependencies and Reproducibility
 ### 4.1 Versions
@@ -175,31 +175,34 @@ Table of per-class Dice, IoU and Boundary scores, on the same test split, for bo
 2D U-Net |	~7.8M	| 170.29 MB |	0.00319 s (3.19 ms) |	102.50 min
 2D CAN	| ~11.3M | 100.42 MB | 0.00243 s (2.43 ms) | 123.74 min
 
-### 6.3 Failure Cases
+### 6.3 Training Statistics
+![Example image](Images/Training_statistics.png)
+
+### 6.4 Failure Cases
 The red shows false negatives, while the blue shows false positives in the overlap difference images.
 
-#### 6.3.1 Failure Case #1
+#### 6.4.1 Failure Case #1
 ![Patient 40, Week 0, Slice 36 segmentation predictions](Images/patient_40_week_0_slice_36.png)
 ![Patient 40, Week 0, Slice 36 difference overlays](Images/patient_40_week_0_slice_36_difference_overlays.png)
 This slice at the base shows a large false negative for the prostate gland for both models (the model underestimated the amount of prostate in the image). The likely root trigger appears to be that the prostate lands in between both the bladder and the rectum, and the prostate isn't very large in this image (smallest of the 3). Additionally, all 3 look very similar in the MRI image, so its hard to distinguish
 
 While both models couldn't really detect the prostate, the CAN model was able to sizably detect more of the prostate than the 2D U-Net.
 
-#### 6.3.2 Failure Case #2
+#### 6.4.2 Failure Case #2
 ![Patient 40, Week 5, Slice 23 segmentation predictions](Images/patient_40_week_5_slice_23.png)
 ![Patient 40, Week 5, Slice 23 difference overlays](Images/patient_40_week_5_slice_23_difference_overlays.png)
 This slice at the base shows another false negative for both models. The likely root trigger appears to be that the prostate is just very small here, and that it is directly below the bladder, which can make the transition between the transition and the prostate hard and blurry.
 
 Both models roughly detected the same amount of prostate existence in the image.
 
-#### 6.3.2 Failure Case #3
+#### 6.4.2 Failure Case #3
 ![Patient 41, Week 0, Slice 39 segmentation predictions](Images/patient_41_week_0_slice_39.png)
 ![Patient 41, Week 0, Slice 39 difference overlays](Images/patient_41_week_0_slice_39_difference_overlays.png)
 This slice at the base shows a false positive for both models (the model overestimated the amount of prostate in the image). The likely root trigger is that the low contrast between the small prostate and the adjacent bladder makes the true boundary difficult to find at the pixel level. Another explanation could be that the network has learnt a typical prostate gland shape and size from the various mid-gland slices, and choose to apply it wrongly where the gland tapers at the base/apex (since that might be an over-representation).
 
 An important discovery here was that the 2D CAN model's prostate boundary was more accurate to the ground truth segmentation (didn't overestimate as much).
 
-#### 6.3.2 Failure Case #4
+#### 6.4.2 Failure Case #4
 ![Patient 42, Week 0, Slice 40 segmentation predictions](Images/patient_42_week_0_slice_40.png)
 ![Patient 42, Week 0, Slice 40 difference overlays](Images/patient_42_week_0_slice_40_difference_overlays.png)
 This slice at the apex shows a false negative for both models. The likely root trigger is that the target segmentation for the prostate is a very small and narrow area, and the low intensity contrast against the adjacent rectal wall makes the boundary difficult to resolve. 
@@ -207,7 +210,7 @@ This slice at the apex shows a false negative for both models. The likely root t
 An important discovery here was that the 2D CAN model was able to detect there was prostate in the image while the 2D U-Net could not. 
 
 ### 6.5 Recommendation to Project Manager
-In terms of accuracy, the 2D CAN model essentially performed at the same level as the 2D U-Net model. It scored a 0.8729 dice coefficient as opposed to U-Net's 0.8681, but CAN's boundary value of 0.7342 was slightly lower compared to U-Net's 0.7538. CAN took about 20 minutes longer to train, but at inference time, it used 70MB less peak VRAM and was 0.7ms faster per slice. These efficiency differences are marginal. Since CAN did not reduce the boundary errors seen with the U-Net (See section 6.3), it's multi-scale context is not justified on accuracy grounds for an operational contouring pipeline.
+In terms of accuracy, the 2D CAN model essentially performed at the same level as the 2D U-Net model. It scored a 0.8729 dice coefficient as opposed to U-Net's 0.8681, but CAN's boundary value of 0.7342 was slightly lower compared to U-Net's 0.7538. CAN took about 20 minutes longer to train, but at inference time, it used 70MB less peak VRAM and was 0.7ms faster per slice. These efficiency differences are marginal. Since CAN did not reduce the boundary errors seen with the U-Net (See section 6.4), it's multi-scale context is not justified on accuracy grounds for an operational contouring pipeline.
 Despite the faster runtime, the fact that it did not adequately eliminate the hazardous boundary errors that the standard 2D U-Net had, does not justify that advanced multi-scale context should be used in an operational contouring pipeline. 
 
 However, since the entire purpose of the model is to serve as an annotation assistant, the model only needs to provide a draft that a specialist corrects. The concern with its usage is that, in the failure cases examined, both models either under-contoured or over-contoured the prostate near the base and apex. Therefore, I recommend these slices be flagged for mandatory manual review. If a single model must be deployed, CAN has a slight efficiency advantage at the same accuracy, but this is a tie-breaker and not a strong reason to prefer it.
