@@ -48,16 +48,19 @@ The provisional computing budget would be to train the U-net for 2 hours, and th
 │   ├── keras_slices_seg_validate/
 │   ├── keras_slices_test/
 │   └── keras_slices_seg_test/
+├── Images/ 
 ├── train.py 
 ├── predict.py
 ├── dataset.py
 ├── modules.py
 ├── README.md
 ```
-- `dataset.py`: Nifti loading, patient-level train/validate/test splitting, normaliation, one-hot encoding, data augmentation. Also enforces patient-level splitting.
+- `Images/`: Graphs and plots of training statistics and selected test set prediction outcomes
+- `dataset.py`: Nifti loading, patient-level train/validate/test splitting, normalisation, one-hot encoding, data augmentation. Also enforces patient-level splitting.
 - `modules.py`: Contains 2D CAN and baseline 2D U-Net model
-- `train.py`: Training, validation, model saving, calculating loss and dice curves overtime, gaining testing set metrics like boundary score and inference time
+- `train.py`: Training, validation, model saving, calculating loss and dice curves overtime, computing test set metrics like boundary score and inference time
 - `predict.py`: Load the saved models (their weights), run it against the test set and produce segmentation and training visualisations
+- `README.md`: Thorough documentation of the models chosen and their outputs
 
 ### 3.2 Running the code
 Run the following commands inside of the `2D_CAN_s48822521` repository
@@ -136,6 +139,31 @@ CAN_STATISTICS = {
 - Training time:
   - 102.50 minutes for 2D U-Net
   - 123.74 minutes for 2D CAN
+- The batch file used to train the 2D CAN model on the Rangpur cluster is shown below:
+  ```
+  #!/bin/bash
+  #SBATCH --job-name=2D-CAN-Training
+  #SBATCH --partition=comp3710
+  #SBATCH --account=comp3710
+  #SBATCH --gres gpu:1
+  #SBATCH --time=04:00:00
+  #SBATCH --output=slurm_%j.out
+  #SBATCH --error=slurm_%j.err
+  
+  # Activate your conda environment
+  source $HOME/miniconda3/bin/activate
+  conda activate torch
+  export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+  
+  python train.py --data_dir /home/groups/comp3710/HipMRI_Study_open/keras_slices_data --model "2D CAN" --save_path "Basic-2D-CAN.pt" --num_epochs 50 --base_channels 32 --batch_size 16
+  ```
+
+### 4.3 Hyperparameters for reproducibility
+The hyperparameters I used to train the models are shown below:
+- `learning_rate = 0.0001`
+- `num_epochs = 50`
+- `base_channels = 32`
+- `batch_size = 16`
 
 ## 5. Data and Pre-processing
 ### 5.1 About the Dataset
@@ -153,11 +181,24 @@ CAN_STATISTICS = {
 - Intensity normalisation using z-scores to ensure stability
 - One-hot encoding of the labels
 - Data augmentation, consisting of horizontal flips and 15 degree offset rotations. Applied to both the image and the segmentation label
-- Used the provided train|validate|test split, which has a ratio of 11400|660|540, which roughly follows the standard 90|5|5 split. The train set was used for updating the weights, the validate set was used for evaluating the model during runtime (updating hyperparameters as needed), and the test set was used to see if the model generalised well, with reported statistics.
+- Used the provided train|validate|test split, which has a ratio of `11400|660|540`, which roughly follows the standard `90%|5%|5%` split. The train set was used for updating the weights, the validate set was used for evaluating the model during runtime (updating hyperparameters as needed), and the test set was used to see if the model generalised well, with reported statistics.
 - Ensured there was patient-level splitting, implemented via code as well. So, all slices and all weekly scans of one patient are placed in the same set.
 
-## 6. Investigation of the Open Research Dilemma
-### 6.1 Baseline 2D U-Net vs 2D CAN
+## 6 Model changes with respect to papers
+### 2D U-Net
+The following changes deviated from the U-Net model provided in [2]:
+- Batch normalisation
+- LeakyReLU activation function
+- `padding=1` instead of `padding=0` to preserve spatial size as we go through convolutions (rather than it shrinking)
+
+### 2D CAN
+The following changes deviated from the U-Net model provided in [1]:
+- Batch normalisation
+- LeakyReLU activation function
+- Just used a simple series of 3 `3x3` convolutions as the front-end of this model's architecture instead, which then gets fed into the context module. 
+
+## 7. Investigation of the Open Research Dilemma
+### 7.1 Baseline 2D U-Net vs 2D CAN
 | Class |	U-Net Dice | CAN Dice |	U-Net IoU	| CAN IoU | U-Net BF Score | CAN BF Score |
 |---|---|---|---|---|---|---|
 Background |	0.9749	| 0.9735 |	0.9509 |	0.9483 | 0.8529 | 0.8461 
@@ -169,56 +210,56 @@ Prostate |	0.8681 |	0.8729 | 0.7670	| 0.7745 | 0.7538 | 0.7342
 
 Table of per-class Dice, IoU and Boundary scores, on the same test split, for both models.
 
-### 6.2 Resource Profiling
+### 7.2 Resource Profiling
 | Model | Parameters | Peak VRAM | Inference time/slice | Training time |
 |---|---|---|---|---|
 2D U-Net |	~7.8M	| 170.29 MB |	0.00319 s (3.19 ms) |	102.50 min
 2D CAN	| ~11.3M | 100.42 MB | 0.00243 s (2.43 ms) | 123.74 min
 
-### 6.3 Training Statistics
+### 7.3 Training Statistics
 ![Example image](Images/Training_statistics.png)
 
-### 6.4 Failure Cases
+### 7.4 Failure Cases
 The red shows false negatives, while the blue shows false positives in the overlap difference images.
 
-#### 6.4.1 Failure Case #1
+#### 7.4.1 Failure Case #1
 ![Patient 40, Week 0, Slice 36 segmentation predictions](Images/patient_40_week_0_slice_36.png)
 ![Patient 40, Week 0, Slice 36 difference overlays](Images/patient_40_week_0_slice_36_difference_overlays.png)
 This slice at the base shows a large false negative for the prostate gland for both models (the model underestimated the amount of prostate in the image). The likely root trigger appears to be that the prostate lands in between both the bladder and the rectum, and the prostate isn't very large in this image (smallest of the 3). Additionally, all 3 look very similar in the MRI image, so its hard to distinguish
 
 While both models couldn't really detect the prostate, the CAN model was able to sizably detect more of the prostate than the 2D U-Net.
 
-#### 6.4.2 Failure Case #2
+#### 7.4.2 Failure Case #2
 ![Patient 40, Week 5, Slice 23 segmentation predictions](Images/patient_40_week_5_slice_23.png)
 ![Patient 40, Week 5, Slice 23 difference overlays](Images/patient_40_week_5_slice_23_difference_overlays.png)
 This slice at the base shows another false negative for both models. The likely root trigger appears to be that the prostate is just very small here, and that it is directly below the bladder, which can make the transition between the transition and the prostate hard and blurry.
 
 Both models roughly detected the same amount of prostate existence in the image.
 
-#### 6.4.2 Failure Case #3
+#### 7.4.2 Failure Case #3
 ![Patient 41, Week 0, Slice 39 segmentation predictions](Images/patient_41_week_0_slice_39.png)
 ![Patient 41, Week 0, Slice 39 difference overlays](Images/patient_41_week_0_slice_39_difference_overlays.png)
 This slice at the base shows a false positive for both models (the model overestimated the amount of prostate in the image). The likely root trigger is that the low contrast between the small prostate and the adjacent bladder makes the true boundary difficult to find at the pixel level. Another explanation could be that the network has learnt a typical prostate gland shape and size from the various mid-gland slices, and choose to apply it wrongly where the gland tapers at the base/apex (since that might be an over-representation).
 
 An important discovery here was that the 2D CAN model's prostate boundary was more accurate to the ground truth segmentation (didn't overestimate as much).
 
-#### 6.4.2 Failure Case #4
+#### 7.4.2 Failure Case #4
 ![Patient 42, Week 0, Slice 40 segmentation predictions](Images/patient_42_week_0_slice_40.png)
 ![Patient 42, Week 0, Slice 40 difference overlays](Images/patient_42_week_0_slice_40_difference_overlays.png)
 This slice at the apex shows a false negative for both models. The likely root trigger is that the target segmentation for the prostate is a very small and narrow area, and the low intensity contrast against the adjacent rectal wall makes the boundary difficult to resolve. 
 
 An important discovery here was that the 2D CAN model was able to detect there was prostate in the image while the 2D U-Net could not. 
 
-### 6.5 Recommendation to Project Manager
+### 7.5 Recommendation to Project Manager
 In terms of accuracy, the 2D CAN model essentially performed at the same level as the 2D U-Net model. It scored a 0.8729 dice coefficient as opposed to U-Net's 0.8681, but CAN's boundary value of 0.7342 was slightly lower compared to U-Net's 0.7538. CAN took about 20 minutes longer to train, but at inference time, it used 70MB less peak VRAM and was 0.7ms faster per slice. These efficiency differences are marginal. Since CAN did not reduce the boundary errors seen with the U-Net (See section 6.4), it's multi-scale context is not justified on accuracy grounds for an operational contouring pipeline.
 Despite the faster runtime, the fact that it did not adequately eliminate the hazardous boundary errors that the standard 2D U-Net had, does not justify that advanced multi-scale context should be used in an operational contouring pipeline. 
 
 However, since the entire purpose of the model is to serve as an annotation assistant, the model only needs to provide a draft that a specialist corrects. The concern with its usage is that, in the failure cases examined, both models either under-contoured or over-contoured the prostate near the base and apex. Therefore, I recommend these slices be flagged for mandatory manual review. If a single model must be deployed, CAN has a slight efficiency advantage at the same accuracy, but this is a tie-breaker and not a strong reason to prefer it.
 
 
-## 7. Artificial Intelligence Usage Disclosure
+## 8. Artificial Intelligence Usage Disclosure
 No AI generation was used for this assignment.
 
-## 8. References
+## 9. References
 1. [1] F. Yu and V. Koltun, “Multi-scale context aggregation by dilated convolutions,” in Proc. ICLR, 2016.
 2. [2] O. Ronneberger, P. Fischer, and T. Brox, “U-Net: Convolutional networks for biomedical image segmentation,” in Proc. MICCAI, 2015, pp. 234–241.
