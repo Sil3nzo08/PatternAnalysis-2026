@@ -1,40 +1,16 @@
-"""
-PURPOSE: Containing the source code of the components of your model. Each component must be implemented as a class or a function in PyTorch or TensorFlow/Keras. Your implementation of the model should not depend on NumPy (or other Python libraries not part of PyTorch / TensorFlow) in any way unless otherwise approved by the teaching staff.
-"""
-
-"""
-U-Net Architecture:
-
-
-The network architecture is illustrated in Figure 1. It consists of a contracting
-path (left side) and an expansive path (right side). The contracting path follows
-the typical architecture of a convolutional network. It consists of the repeated
-application of two 3x3 convolutions (unpadded convolutions), each followed by
-a rectified linear unit (ReLU) and a 2x2 max pooling operation with stride 2
-for downsampling. At each downsampling step we double the number of feature
-channels. Every step in the expansive path consists of an upsampling of the
-feature map followed by a 2x2 convolution (“up-convolution”) that halves the
-number of feature channels, a concatenation with the correspondingly cropped
-feature map from the contracting path, and two 3x3 convolutions, each followed by a ReLU. The cropping is necessary due to the loss of border pixels
-in every convolution. At the final layer a 1x1 convolution is used to map each
-64-component feature vector to the desired number of classes. In total the network has 23 convolutional layers.
-To allow a seamless tiling of the output segmentation map (see Figure 2), it is
-important to select the input tile size such that all 2x2 max-pooling operations
-are applied to a layer with an even x- and y-size.
-
-
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class DoubleConv(nn.Module):
-    """
-    One block: 2x (3x3 convolutions + RELU)
-    Normalisation added to perhaps make training more stable
-    """
+    """Apply two convolution, batch normalization, and LeakyReLU sequences.
 
+    The convolutions preserve the input's spatial dimensions.
+
+    Args:
+        in_channels: Number of input feature channels.
+        out_channels: Number of output feature channels.
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
 
@@ -52,8 +28,11 @@ class DoubleConv(nn.Module):
 
 
 class DownBlock(nn.Module):
-    """
-    Max pool to downsample, then DoubleConv    
+    """Downsample a feature map with max pooling, then apply "DoubleConv".
+
+    Args:
+        in_channels: Number of input feature channels.
+        out_channels: Number of output feature channels.
     """
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -64,8 +43,13 @@ class DownBlock(nn.Module):
         return self.conv_block(self.max_pool(x))
 
 class UpBlock(nn.Module):
-    """
-    2x2 Up-convolution, then DoubleConv
+    """Upsample a feature map and combine it with an encoder skip connection.
+
+    The combined features are processed by a "DoubleConv" block.
+
+    Args:
+        in_channels: Number of input feature channels.
+        out_channels: Number of output feature channels.
     """
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -82,6 +66,17 @@ class UpBlock(nn.Module):
 
 
 class BasicUNet2D(nn.Module):
+    """U-Net for 2D image segmentation.
+
+    Uses an encoder, bottleneck, and decoder with skip connections to produce
+    per-pixel class logits.
+
+    Args:
+        in_channels: Number of channels in each input image.
+        base_channels: Number of feature channels in the first encoder stage.
+        num_classes: Number of output segmentation classes.
+    """
+
     def __init__(self, in_channels, base_channels, num_classes):
         super().__init__()
 
@@ -123,8 +118,14 @@ class BasicUNet2D(nn.Module):
 
 ############## 2D CAN ##############
 class ContextModule(nn.Module):
-    """
-    Following the basic context module structure in the paper.
+    """Extract multi-scale context features using dilated convolutions (follows the paper).
+
+    Produces per-pixel class logits while preserving the input's spatial
+    dimensions. 
+
+    Args:
+        channels: Number of input and intermediate feature channels.
+        num_classes: Number of output segmentation classes.
     """
 
     def __init__(self, channels, num_classes):
@@ -183,8 +184,15 @@ class ContextModule(nn.Module):
         return self.conv8(x) # Final layer doesn't have ReLU
 
 class Basic2DCAN(nn.Module):
-    """
-    The complete 2D CAN, with a simple convolution front-end that is fed into the context module.
+    """2D Context Aggregation Network for image segmentation.
+
+    A convolutional front end extracts features, which are passed to a
+    "ContextModule" to produce per-pixel class logits.
+
+    Args:
+        in_channels: Number of channels in each input image.
+        base_channels: Width multiplier for the front-end convolutional layers.
+        num_classes: Number of output segmentation classes.
     """
     def __init__(self, in_channels, base_channels, num_classes):
         super().__init__()
@@ -203,19 +211,3 @@ class Basic2DCAN(nn.Module):
     def forward(self, x):
         feature_maps = self.front_end(x) # (B, C, 256, 128)
         return self.context_module(feature_maps) # (B, num_classes, 256, 128)
-
-
-
-
-if __name__ == "__main__":
-    model = BasicUNet2D(in_channels=1, base_channels=32, num_classes=6)
-    x = torch.randn(2, 1, 256, 128)
-    y = model(x)
-    print(y.shape)                                     # torch.Size([2, 6, 256, 128])
-    print(sum(p.numel() for p in model.parameters()))  # roughly 7.8M at base 32
-
-    model = Basic2DCAN(in_channels=1, base_channels=32, num_classes=6)
-    x = torch.randn(2, 1, 256, 128)
-    y = model(x)
-    print(y.shape)                                     # torch.Size([2, 6, 256, 128])
-    print(sum(p.numel() for p in model.parameters()))  # roughly 11.3M at base 32

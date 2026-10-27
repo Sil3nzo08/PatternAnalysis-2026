@@ -1,7 +1,3 @@
-"""
-PURPOSE: Containing the source code for training, validating, testing, and saving your model. The model should be imported from modules.py and the data loader should be imported from dataset.py. Make sure to plot the losses and metrics during training.
-"""
-
 import time
 
 from torch.utils.data import DataLoader, Subset
@@ -17,10 +13,15 @@ from scipy import ndimage as ndi
 import argparse
 
 def calculate_dice_loss(predictions, labels, eps=1e-6):
-    """
-    Multi-class dice loss. 
-    Prediction and label are of form (B, C, H, W)
-    Label targets are one-hot
+    """Calculate the mean multi-class soft Dice loss.
+
+    Args:
+        predictions: Model logits with shape (B, C, H, W).
+        labels: One-hot target masks with shape (B, C, H, W).
+        eps: Small value added for numerical stability.
+
+    Returns:
+        Scalar Dice loss.
     """
     prediction_probs = torch.softmax(predictions, dim=1)
 
@@ -34,12 +35,18 @@ def calculate_dice_loss(predictions, labels, eps=1e-6):
 
 
 def calculate_dice_components(predictions, labels, num_classes):
-    """
-    Returns the overlap and total counts, so you can calculate dice coefficient and IoU 
-    Prediction and label are of form (B, C, H, W)
-    Label targets are one-hot
+    """Calculate per-class overlap and combined pixel counts.
 
-    Dice coefficient (DSC) per class/channel (1.0 = perfect match, 0.0 means no overlap)
+    Predictions are converted to class labels using argmax before computing
+    the counts.
+
+    Args:
+        predictions: Model logits with shape (B, C, H, W).
+        labels: One-hot target masks with shape (B, C, H, W).
+        num_classes: Number of segmentation classes.
+
+    Returns:
+        Tuple of per-class overlap counts and combined prediction/target counts.
     """
     prediction_answers = predictions.argmax(dim=1) # Picks the class with the highest score (and stores the classID as the entries)
     predictions_onehot = F.one_hot(prediction_answers, num_classes).permute(0, 3, 1, 2).float() # Convert classIDs to one-hot entries, also (B, 256, 128, 6) -> (B, 6, 256, 128)
@@ -51,6 +58,26 @@ def calculate_dice_components(predictions, labels, num_classes):
 
 
 def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epochs, model_save_path, device, num_classes, eps=1e-6):
+    """Train a segmentation model and evaluate it after each epoch.
+
+    Tracks training and validation Dice loss, reports per-class validation Dice
+    and IoU, and saves the model weights when validation loss improves.
+
+    Args:
+        model: Segmentation model to train.
+        train_dataloader: Data loader for training samples.
+        validate_dataloader: Data loader for validation samples.
+        optimizer: Optimizer used to update model parameters.
+        num_epochs: Number of training epochs.
+        model_save_path: Destination for the best model's state dictionary.
+        device: Device on which to run training and validation.
+        num_classes: Number of segmentation classes.
+        eps: Small value used for numerical stability in metric calculations.
+
+    Returns:
+        Dictionary containing per-epoch training and validation loss histories.
+    """
+
     model = model.to(device)
     training_history = {"Train Loss": [], "Validate Loss": []}
     best_validation_loss = float("inf")
@@ -130,17 +157,23 @@ def train_model(model, train_dataloader, validate_dataloader, optimizer, num_epo
 
 
 def test_model(model, test_dataloader, num_classes, model_save_path, device, eps=1e-6):
-    """
-    Load model, and report per-class Dice and IoU over the whole test
+    """Evaluate a saved segmentation model on the test data.
+
+    Loads model weights, reports per-class Dice, IoU, and boundary F1 scores, and
+    reports peak GPU memory use and average per-sample inference time.
+
+    Args:
+        model: Segmentation model to evaluate.
+        test_dataloader: Data loader for test samples.
+        num_classes: Number of segmentation classes.
+        model_save_path: Path to the saved model state dictionary.
+        device: Device on which to run evaluation.
+        eps: Small value added for numerical stability in Dice and IoU calculations.
     """
     model.load_state_dict(torch.load(model_save_path))
     model = model.to(device)
 
     print("================ TESTING =========================")
-
-    # Check class 5 is actually being recognized by model
-    print_class_pixel_counts(model, train_dataloader, num_classes, device, "train")
-    print_class_pixel_counts(model, validate_dataloader, num_classes, device, "validation")
 
     # Keep a tally/count of all overlap and total so that we can compute dice and IoU per-class at the end
     overlap = torch.zeros(num_classes, device=device)
@@ -205,37 +238,22 @@ def test_model(model, test_dataloader, num_classes, model_save_path, device, eps
 
     print("==================================================")
 
-
-def print_class_pixel_counts(model, dataloader, num_classes, device, split_name):
-    actual_pixels = torch.zeros(num_classes, device=device, dtype=torch.long)
-    predicted_pixels = torch.zeros(num_classes, device=device, dtype=torch.long)
-
-    model.eval()
-    with torch.no_grad():
-        for images, masks, _ in dataloader:
-            images = images.to(device)
-            masks = masks.to(device)
-
-            outputs = model(images)
-            predicted_classes = outputs.argmax(dim=1)
-
-            actual_pixels += masks.sum(dim=(0, 2, 3)).long()
-            predicted_pixels += torch.bincount(
-                predicted_classes.reshape(-1),
-                minlength=num_classes,
-            )
-
-    print(f"--- {split_name} class pixel counts ---")
-    for class_id in range(num_classes):
-        print(
-            f"class {class_id}: "
-            f"actual={actual_pixels[class_id].item():,}, "
-            f"predicted={predicted_pixels[class_id].item():,}"
-        )
-
 def calculate_bf_score(predictions, labels, num_classes, distance_threshold=2):
-    """
-    Computer per-image boundary F1 scores for a batch
+    """Calculate per-class boundary F1 scores for each image in a batch.
+
+    A predicted boundary pixel is considered matched when it is within
+    distance_threshold pixels of a target boundary, and vice versa.
+
+    Args:
+        predictions: Model logits with shape (B, C, H, W).
+        labels: One-hot target masks with shape (B, C, H, W).
+        num_classes: Number of segmentation classes.
+        distance_threshold: Maximum boundary distance, in pixels, for a match.
+
+    Returns:
+        Tuple of per-class sums of boundary F1 scores and per-class counts of
+        scored images. Images where a class is absent from both prediction and
+        target are excluded.
     """
     
     prediction_IDs = predictions.argmax(dim=1).detach().cpu().numpy()
@@ -290,6 +308,12 @@ UNET_MODEL_PATH = "Basic-U-Net.pt"
 CAN_MODEL_PATH = "Basic-2D-CAN.pt"
 
 def parse_args():
+    """Parse command-line options for training and model configuration.
+
+    Returns:
+        Parsed arguments, including model choice, data and save paths, and
+        training hyperparameters.
+    """
     parser = argparse.ArgumentParser()
 
     # Model choice

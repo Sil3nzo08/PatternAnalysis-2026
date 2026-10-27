@@ -1,16 +1,3 @@
-"""
-PURPOSE: Containing the data loader for loading and preprocessing your data, including leakagefree train/validation/test splitting functions and data augmentations.
-
-Data Pipeline & Alignment: Enforce strict patient-level splitting. Standardize intensity normalization and one-hot multi-channel mask encoding. Preserve exact spatial alignment between images and ground truth masks (see Appendix B for Nifti loading).
-
-The classes for the mask are: [0, 1, 2, 3, 4, 5]
-
-TODO:
-- Need to augment data to generate some more 
-- Probably should have an actual rigorous and thorough tester to ensure there's no data leakage between train-validate-test sets
-
-"""
-
 from torch.utils.data import Dataset, DataLoader
 
 import nibabel as nib
@@ -29,8 +16,13 @@ FLIP_CHANCE = 0.4
 
 
 def extract_key(name: str):
-    """
-    Goes from 'case_004_week_0_slice_3.nii.gz' -> (4, 0, 3)
+    """Extract patient, week, and slice numbers from a slice filename.
+
+    Args:
+        name: Filename formatted like "case_004_week_0_slice_3.nii.gz".
+
+    Returns:
+        Tuple of integer (patient, week, slice) identifiers.
     """
     _, patient_num, _, week_num, _, slice_part = name.split("_")
     slice_num, _, _ = slice_part.split(".")
@@ -38,8 +30,19 @@ def extract_key(name: str):
     return (int(patient_num), int(week_num), int(slice_num))
 
 def build_img_seg_pairs(img_dir, seg_dir):
-    """
-    Returns a dictionary that uses (patient, week, slice) as the key, and the value being a tuple (image, segment).
+    """Pair image and segmentation files by patient, week, and slice.
+
+    Files whose image or segmentation shape differs from "IMAGE_SHAPE" are
+    excluded. Image and segmentation directories must contain the same number
+    of files, and corresponding filenames must have matching identifiers.
+
+    Args:
+        img_dir: Directory containing image files.
+        seg_dir: Directory containing segmentation files.
+
+    Returns:
+        Dictionary mapping each (patient, week, slice) key to its image and
+        segmentation file paths.
     """
 
     img_files = sorted(os.listdir(img_dir), key=extract_key)
@@ -67,6 +70,17 @@ def build_img_seg_pairs(img_dir, seg_dir):
     return img_seg_pairs
 
 def get_seg_classes(seg_dir):
+    """Count the distinct label values present in a segmentation directory.
+
+    Gets the num_classes essentially.
+
+    Args:
+        seg_dir: Directory containing segmentation files.
+
+    Returns:
+        Number of distinct segmentation labels found.
+    """
+
     labelIDs = set()
 
     for filename in os.listdir(seg_dir):
@@ -79,8 +93,15 @@ def get_seg_classes(seg_dir):
     return len(labelIDs)
 
 def enforce_patient_level_splitting(train_pairs, validate_pairs, test_pairs):
-    """
-    Ensures there is no data leakage across the 3 sets. Should be called before we start building the datasets and dataloader
+    """Check that patient IDs do not overlap across dataset splits.
+
+    Args:
+        train_pairs: Image-segmentation pairs for training.
+        validate_pairs: Image-segmentation pairs for validation.
+        test_pairs: Image-segmentation pairs for testing.
+
+    Raises:
+        ValueError: If any patient appears in more than one split.
     """
     train_set = set(key[0] for key in train_pairs.keys())
     validate_set = set(key[0] for key in validate_pairs.keys())
@@ -97,6 +118,18 @@ def enforce_patient_level_splitting(train_pairs, validate_pairs, test_pairs):
 
 
 class HipMRIDataset2D(Dataset):
+    """PyTorch dataset for 2D hip MRI slices and segmentation masks.
+
+    Loads and normalizes images, optionally augments the image and mask with
+    matching flips and rotations, and converts masks to one-hot tensors.
+
+    Args:
+        pairs: Mapping from (patient, week, slice) keys to image and
+            segmentation file paths.
+        num_classes: Number of segmentation classes for one-hot encoding.
+        augmentationEnabled: Whether to apply random augmentation.
+    """
+
     def __init__(self, pairs, num_classes, augmentationEnabled = False):
         self.pairs = pairs
         self.keys = list(pairs.keys()) # Already in order/sorted thanks to dictionary's order
@@ -151,6 +184,22 @@ class HipMRIDataset2D(Dataset):
 
 
 def get_dataloaders(root, batch_size, num_workers=0):
+    """Create training, validation, and test data loaders.
+
+    Builds image-segmentation pairs and datasets from the expected subdirectories
+    under root, checks patient-level split separation, and enables augmentation
+    for the training dataset only.
+
+    Args:
+        root: Directory containing the image and segmentation split folders.
+        batch_size: Number of samples per batch.
+        num_workers: Number of worker processes used to load data.
+
+    Returns:
+        Tuple of training, validation, and test data loaders, followed by the
+        number of segmentation classes.
+    """
+
     # Get all paths
     train_img = os.path.join(root, "keras_slices_train")
     train_seg = os.path.join(root, "keras_slices_seg_train")
@@ -181,9 +230,3 @@ def get_dataloaders(root, batch_size, num_workers=0):
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
 
     return train_dataloader, validate_dataloader, test_dataloader, num_classes
-
-
-
-if __name__ == "__main__":
-    train, val, test, num_classes = get_dataloaders(ROOT, 8)
-    ds = train.dataset

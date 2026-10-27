@@ -1,9 +1,3 @@
-"""
-PURPOSE: Showing example usage of your trained model. It should load your saved model weights, run inference on test cases, print out any results, and provide visualisations where applicable (e.g., prediction overlays, generated samples, heatmaps). NumPy is allowed in this script for visualization or loading data.
-"""
-
-
-
 import dataset
 import modules 
 import data
@@ -16,6 +10,20 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
 def plot_training_loss_and_dice_coefficient(num_epochs, u_net_statistics, can_statistics, output_dir):
+    """Plot and save training metrics for the U-Net and CAN models.
+
+    Each model's training and validation losses and per-class Dice coefficients
+    are plotted over the specified number of epochs.
+
+    Args:
+        num_epochs: Number of epochs represented in the statistics.
+        u_net_statistics: U-Net metrics containing train_loss,
+            validation_loss, and dice_coefficient entries.
+        can_statistics: CAN metrics with the same entries as
+            u_net_statistics.
+        output_dir: Directory where the plot image is saved.
+    """
+
     figure, axes = plt.subplots(2, 2, figsize=(14, 10))
     epochs = range(1, num_epochs + 1)
 
@@ -70,6 +78,22 @@ def plot_training_loss_and_dice_coefficient(num_epochs, u_net_statistics, can_st
     
 
 def difference_overlay(image, ground_truth, prediction, class_id):
+    """Create an RGB overlay showing per-pixel classification results.
+
+    For the requested class, correct predictions are shown in green, false
+    negatives in red, and false positives in blue, blended with the grayscale
+    input image.
+
+    Args:
+        image: Two-dimensional input image.
+        ground_truth: Two-dimensional ground-truth class map.
+        prediction: Two-dimensional predicted class map.
+        class_id: Class whose prediction results to display.
+
+    Returns:
+        RGB image as a NumPy array.
+    """
+
     true_positive = (ground_truth == class_id) & (prediction == class_id)
     false_positive = (ground_truth != class_id) & (prediction == class_id)
     false_negative = (ground_truth == class_id) & (prediction != class_id)
@@ -99,6 +123,17 @@ def difference_overlay(image, ground_truth, prediction, class_id):
     return (overlay*255).astype(np.uint8)
 
 def save_test_slice_overlays(image, ground_truth_seg, u_net_prediction, can_prediction, key, output_dir, num_classes):
+    """Save per-class difference overlays for both models for one test slice.
+
+    Args:
+        image: Two-dimensional input image.
+        ground_truth_seg: Two-dimensional ground-truth class map.
+        u_net_prediction: U-Net's predicted class segmentation mask.
+        can_prediction: CAN's predicted class segmentation mask.
+        key: Slice identifier containing patient, week, and slice index.
+        output_dir: Directory where the overlay figure is saved.
+        num_classes: Number of segmentation classes to display.
+    """
     patient, week, slice_index = key
 
     figure, axes = plt.subplots(2, num_classes, figsize=(32, 8), squeeze = False)
@@ -118,6 +153,20 @@ def save_test_slice_overlays(image, ground_truth_seg, u_net_prediction, can_pred
 
 
 def save_test_slice(image, ground_truth_seg, u_net_prediction, can_prediction, key, output_dir, num_classes):
+    """Save a comparison figure for one test slice.
+
+    The figure shows the input image, ground-truth segmentation, and predictions
+    from the U-Net and CAN models.
+
+    Args:
+        image: Two-dimensional input image.
+        ground_truth_seg: Two-dimensional ground-truth class map.
+        u_net_prediction: U-Net's predicted class map.
+        can_prediction: CAN's predicted class map.
+        key: Slice identifier containing patient, week, and slice index.
+        output_dir: Directory where the figure is saved.
+        num_classes: Number of segmentation classes used for the color map.
+    """
     patient, week, slice_index = key 
 
     class_colourmap = ListedColormap(plt.get_cmap("tab10").colors[:num_classes]) # For colouring segmentations
@@ -147,6 +196,16 @@ def save_test_slice(image, ground_truth_seg, u_net_prediction, can_prediction, k
     plt.close(figure)
 
 def get_predictions(u_net_model, can_model, dataset, output_directory, num_classes, device):
+    """Run both models on a dataset and save visualizations for each slice.
+
+    Args:
+        u_net_model: U-Net model used to generate predictions.
+        can_model: CAN model used to generate predictions.
+        dataset: Iterable yielding image batches, one-hot masks, and slice keys.
+        output_directory: Directory where slice figures and overlays are saved.
+        num_classes: Number of segmentation classes.
+        device: Device on which to run model inference.
+    """
     u_net_model.eval()
     can_model.eval()
 
@@ -176,10 +235,6 @@ def get_predictions(u_net_model, can_model, dataset, output_directory, num_class
 
 
 
-
-
-
-
 ############# HYPER-PARAMETERS #############
 learning_rate = 1e-4
 batch_size = 16
@@ -192,9 +247,12 @@ ROOT = r"Dataset\keras_slices_data"
 PREDICTION_PATH = r"ExperimentData\TestSlices"
 TRAINING_PLOTS_PATH = r"ExperimentData"
 
-
-
 def parse_args():
+    """Parse command-line options for prediction data and model configuration.
+
+    Returns:
+        Parsed arguments, including the data directory and training hyperparameters.
+    """
     parser = argparse.ArgumentParser()
 
     # File IO
@@ -232,6 +290,7 @@ if __name__ == "__main__":
     can_model.to(device)
 
     # Get predictions
-    # get_predictions(u_net_model, can_model, test_dataloader, PREDICTION_PATH, num_classes, device)
+    get_predictions(u_net_model, can_model, test_dataloader, PREDICTION_PATH, num_classes, device)
 
+    # Get training statistics
     plot_training_loss_and_dice_coefficient(num_epochs, data.U_NET_STATISTICS, data.CAN_STATISTICS, TRAINING_PLOTS_PATH)
