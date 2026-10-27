@@ -221,6 +221,13 @@ Table of per-class Dice, IoU and Boundary scores, on the same test split, for bo
 
 ### 7.4 Failure Cases
 The red shows false negatives, while the blue shows false positives in the overlap difference images.
+As for the segmentation colouring:
+- `class 0 = blue`
+- `class 1 = orange`
+- `class 2 = green`
+- `class 3 = red`
+- `class 4 = purple`
+- `class 5 = brown`
 
 #### 7.4.1 Failure Case #1
 ![Patient 40, Week 0, Slice 36 segmentation predictions](Images/patient_40_week_0_slice_36.png)
